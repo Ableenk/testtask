@@ -1,1 +1,1 @@
-# testtask
+Requirements: numba, seaborn, numpy, pandas
