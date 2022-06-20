@@ -73,15 +73,15 @@ def get_UPL(balance, currencies, ask_prices, timestamp):
         UPL += currencies[active_id] * ask_prices[active_id][timestamp]
     return UPL
 
-def run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commission, delay, sample_size=1000):
+def run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commission, delay, sample_size=1000):             
     balance = max_position_usd
     pq = PositionsQueue(delay)
     actives_count = ask_prices.shape[0]
     currencies = [0] * actives_count
     zero_UPL = get_UPL(balance, currencies, ask_prices, 0)
-    UPLs = np.array([zero_UPL])
+    UPLs = np.array([balance])
     for timestamp in range(min(sample_size, signals_array.shape[1])):
-        position_amount = balance / actives_count
+        position_amount = min(balance, max_position_usd) / actives_count
         to_handle = pq.step()
         for active_id in range(actives_count):
             if signals_array[active_id][timestamp] == 1:
@@ -92,20 +92,21 @@ def run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commis
             elif signals_array[active_id][timestamp] == -1:
                 currency_amount = position_amount / ask_prices[active_id][timestamp]
                 balance += position_amount - commission
-                pq.add(active_id, position_amount, False)
+                pq.add(active_id, currency_amount, False)
                 currencies[active_id] += currency_amount
             if active_id in to_handle:
                 for handling in to_handle[active_id]:
                     amount = handling[0]
+                    balance -= commission
                     if handling[1]:
                         currencies[active_id] -= amount
-                        balance += amount * ask_prices[active_id][timestamp] - commission
+                        balance += amount * ask_prices[active_id][timestamp]
                     else:
                         currencies[active_id] += amount
-                        balance -= amount * bid_prices[active_id][timestamp] - commission
+                        balance -= amount * bid_prices[active_id][timestamp]
             tmp_UPL = get_UPL(balance, currencies, ask_prices, timestamp)
             UPLs = np.append(UPLs, (tmp_UPL))
-    return UPLs - UPLs[0]                        
+    return UPLs - UPLs[0]                     
 
 def to_maximaze(x, ask_prices, bid_prices, max_position_usd, commission, delay):
     long_threshold, short_threshold, window_size, last_weight = x
