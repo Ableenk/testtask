@@ -1,4 +1,5 @@
 import os
+import scipy
 from math import inf
 
 import numpy as np
@@ -72,15 +73,14 @@ def get_UPL(balance, currencies, ask_prices, timestamp):
         UPL += currencies[active_id] * ask_prices[active_id][timestamp]
     return UPL
 
-def run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commission, delay):
+def run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commission, delay, sample_size=1000):
     balance = max_position_usd
-    sample_size = 1000
     pq = PositionsQueue(delay)
     actives_count = ask_prices.shape[0]
-    currencies = [1000] * actives_count
+    currencies = [0] * actives_count
     zero_UPL = get_UPL(balance, currencies, ask_prices, 0)
     UPLs = np.array([zero_UPL])
-    for timestamp in range(sample_size):
+    for timestamp in range(min(sample_size, signals_array.shape[1])):
         position_amount = balance / actives_count
         to_handle = pq.step()
         for active_id in range(actives_count):
@@ -107,17 +107,33 @@ def run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commis
             UPLs = np.append(UPLs, (tmp_UPL))
     return UPLs - UPLs[0]                        
 
+def to_maximaze(x, ask_prices, bid_prices, max_position_usd, commission, delay):
+    long_threshold, short_threshold, window_size, last_weight = x
+    signals_array = generate_signal(ask_prices, bid_prices, long_threshold, short_threshold, window_size, last_weight)
+    UPLs = run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commission, delay)
+    sharp_coefficient = sharp_coef(UPLs)
+    return -sharp_coefficient
+
+def get_arguments(ask_prices, bid_prices, max_position_usd, commission, delay):
+    bounds = ((100, 1000), (100, 1000), (5, 100), (0.0001, 0.001)) 
+    result = scipy.optimize.differential_evolution(to_maximaze, bounds, args=(ask_prices, bid_prices, max_position_usd, commission, delay), disp=False, polish=False, updating='deferred')
+    return result
+
+def sharp_coef(UPLs):
+    if UPLs.std() == 0:
+        return +inf
+    return UPLs.mean()/UPLs.std()                   
+
 def main(directory_name: str):
     max_position_usd = 5000
     commission = 5
     delay = 10
-    ask_prices, bid_prices = get_data(directory_name, sample_size = 10000)
-    long_threshold = +inf
-    short_threshold = -inf
-    window_size = 5
-    last_weight = 0.25
+    ask_prices, bid_prices = get_data(directory_name, sample_size = 100)
+    result = get_arguments(ask_prices, bid_prices, max_position_usd, commission, delay)
+    long_threshold, short_threshold, window_size, last_weight = result.x
     signals_array = generate_signal(ask_prices, bid_prices, long_threshold, short_threshold, window_size, last_weight)
-    UPLs = run_backtest(ask_prices, bid_prices, signals_array, max_position_usd, commission, delay)
+    UPLs = run_backtest(ask_prices, bid_prices, signals_array, 5000, 5, 10)
+    print(-result.fun)
     lineplot_by_y(UPLs)
 
 if __name__ == '__main__':
